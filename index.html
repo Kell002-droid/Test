@@ -1,0 +1,87 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b2239"><link rel="manifest" href="manifest.json"><link rel="icon" href="icon-192.png"><title>Trip Plan</title>
+<style>
+:root{--bg:#eef3f5;--ink:#0b1f2e;--mute:#566a78;--acc:#1d4ed8;--now:#f5b700;--line:#cfdbe2}
+@media(prefers-color-scheme:dark){:root{--bg:#0a1218;--ink:#e6eef2;--mute:#9db1bd;--acc:#8fb0ff;--now:#ffc53d;--line:#22323d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.45 system-ui,sans-serif;font-variant-numeric:tabular-nums}
+header{position:sticky;top:0;z-index:2;background:var(--bg);padding:calc(8px + env(safe-area-inset-top)) 14px 8px;border-bottom:1px solid var(--line)}
+.r{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}
+#day{font-size:22px;font-weight:800}
+small{color:var(--mute);font-size:13px}
+button{font:inherit;color:var(--ink);background:none;border:1px solid var(--line);border-radius:999px;min-width:44px;min-height:44px;padding:0 14px}
+main{max-width:640px;margin:auto;padding:6px 14px calc(28px + env(safe-area-inset-bottom))}
+.ev{display:grid;grid-template-columns:78px 1fr;gap:12px;padding:16px 0 16px 12px;border-bottom:1px solid var(--line);border-left:5px solid transparent}
+.ev.now{border-left-color:var(--now)}
+.t{font-weight:800;color:var(--acc);line-height:1.25}
+.t span{display:block;font-weight:500;color:var(--mute)}
+.h{font-size:19px;font-weight:700}
+.pill{display:inline-block;font-size:12px;font-weight:700;background:var(--now);color:#0b1f2e;border-radius:6px;padding:1px 7px;margin-right:6px}
+.m{color:var(--mute);font-size:15px}
+.n{margin-top:6px}
+a{color:var(--acc);font-weight:700}
+#setup{display:flex;gap:8px;padding:10px 14px}#setup[hidden]{display:none}
+#setup input{flex:1;min-width:0;font:inherit;padding:10px;border-radius:10px;border:1px solid var(--line);background:none;color:var(--ink)}
+p.e{text-align:center;color:var(--mute);padding:28px 0}
+</style></head><body>
+<header><div class="r"><button id="prev" aria-label="Previous day">‹</button><b id="day"></b><button id="next" aria-label="Next day">›</button></div>
+<div class="r"><small id="status"></small><span><button id="today">Today</button> <button id="refresh" aria-label="Refresh">⟳</button> <button id="gear" aria-label="Sheet link">⚙</button></span></div></header>
+<div id="setup" hidden><input id="url" placeholder="Paste your sheet’s published CSV link"><button id="save">Save</button></div>
+<main id="list"></main>
+<script>
+const $=s=>document.querySelector(s),KEY='sheetUrl',CK='sheetCache';
+const MAP={date:/\bdate\b|^day\b/i,addr:/address/i,end:/\b(end|until|finish|to)\b/i,start:/start|time|when|from/i,title:/activity|plan|title|what|event|task/i,place:/location|place|venue|where/i,notes:/comment|note|detail|info/i};
+let hdr=[],rows=[],map={},stamp='',day=new Date();day.setHours(0,0,0,0);
+const esc=s=>String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const msg=t=>$('#list').innerHTML=`<p class="e">${esc(t)}</p>`;
+function parseCSV(t){const o=[];let r=[],f='',q=0;
+ for(let i=0;i<t.length;i++){const c=t[i];
+  if(q){if(c=='"'){if(t[i+1]=='"'){f+='"';i++}else q=0}else f+=c}
+  else if(c=='"')q=1;
+  else if(c==','){r.push(f);f=''}
+  else if(c=='\n'){r.push(f);o.push(r);r=[];f=''}
+  else if(c!='\r')f+=c}
+ if(f||r.length){r.push(f);o.push(r)}
+ return o.filter(r=>r.some(x=>x.trim()))}
+function toDate(s){s=(s||'').trim();if(!s)return null;let m;
+ if(m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))return new Date(+m[1],m[2]-1,+m[3]);
+ if(m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/)){let y=+m[3];if(y<100)y+=2000;return new Date(y,m[2]-1,+m[1])}
+ const d=new Date(/\d{4}/.test(s)?s:s+' '+new Date().getFullYear());
+ return isNaN(d)?null:new Date(d.getFullYear(),d.getMonth(),d.getDate())}
+const tm=s=>[...(s||'').matchAll(/(\d{1,2})(?::(\d{2}))?\s*([ap]m)?/ig)].map(m=>{let h=+m[1]%24;if(m[3])h=h%12+(/p/i.test(m[3])?12:0);return h*60+ +(m[2]||0)});
+function load(){const u=localStorage.getItem(KEY);if(!u)return;$('#status').textContent='Updating…';
+ fetch(u,{cache:'no-store'}).then(r=>{if(!r.ok)throw 0;return r.text()})
+ .then(t=>{const at=Date.now();localStorage.setItem(CK,JSON.stringify({t,at}));use(t,at,0)})
+ .catch(()=>{const c=JSON.parse(localStorage.getItem(CK)||'null');c?use(c.t,c.at,1):($('#status').textContent='',msg('Couldn’t load the sheet. Tap ⚙ and check the link is a published CSV.'))})}
+function use(t,at,off){const g=parseCSV(t.replace(/^\uFEFF/,''));hdr=(g.shift()||[]).map(s=>s.trim());
+ rows=g.map(r=>Object.fromEntries(hdr.map((h,i)=>[h,(r[i]||'').trim()])));
+ map={};hdr.forEach(h=>{for(const k in MAP)if(!map[k]&&MAP[k].test(h)){map[k]=h;break}});
+ stamp=(off?'Offline, saved ':'Updated ')+new Date(at).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'});show()}
+function show(){const n=new Date(),t0=new Date(n.getFullYear(),n.getMonth(),n.getDate()),today=+day==+t0;
+ $('#day').textContent=(today?'Today, ':'')+day.toLocaleDateString([],today?{day:'numeric',month:'short'}:{weekday:'short',day:'numeric',month:'short'});
+ $('#status').textContent=stamp;if(!hdr.length)return;
+ const L=map.date?rows.filter(r=>{const d=toDate(r[map.date]);return d&&+d==+day}):rows;
+ if(!L.length)return msg('Nothing planned for this day.');
+ const nm=n.getHours()*60+n.getMinutes(),used=new Set(Object.values(map));
+ const T=L.map(r=>{const a=tm(r[map.start]),b=map.end?tm(r[map.end]):[];return{s:a[0],e:b[0]??a[1]}});
+ const nx=today?T.findIndex(x=>x.s>nm):-1;
+ $('#list').innerHTML=L.map((r,i)=>{const x=T[i],on=today&&x.s<=nm&&nm<x.e,q=r[map.addr]||r[map.place],tx=[r[map.start],r[map.end]].filter(Boolean);
+  return`<div class="ev${on?' now':''}"><div class="t">${tx.map((s,j)=>j?`<span>${esc(s)}</span>`:esc(s)).join('')}</div><div>
+  <div class="h">${on?'<span class="pill">Now</span>':i==nx?'<span class="pill">Next</span>':''}${esc(r[map.title]||r[map.place])}</div>
+  ${map.title&&r[map.place]?`<div>${esc(r[map.place])}</div>`:''}${r[map.addr]?`<div class="m">${esc(r[map.addr])}</div>`:''}
+  ${q?`<a href="https://www.google.com/maps/search/?api=1&amp;query=${encodeURIComponent(q)}">Open in Maps</a>`:''}
+  ${r[map.notes]?`<div class="n">${esc(r[map.notes])}</div>`:''}
+  ${hdr.filter(h=>!used.has(h)&&r[h]).map(h=>`<div class="m">${esc(h)}: ${esc(r[h])}</div>`).join('')}</div></div>`}).join('')}
+$('#prev').onclick=()=>{day.setDate(day.getDate()-1);show()};
+$('#next').onclick=()=>{day.setDate(day.getDate()+1);show()};
+$('#today').onclick=()=>{day=new Date();day.setHours(0,0,0,0);show()};
+$('#refresh').onclick=load;
+$('#gear').onclick=()=>{$('#url').value=localStorage.getItem(KEY)||'';$('#setup').hidden=!$('#setup').hidden};
+$('#save').onclick=()=>{const u=$('#url').value.trim();if(u){localStorage.setItem(KEY,u);$('#setup').hidden=true;load()}};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)load()});
+setInterval(()=>hdr.length&&show(),6e4);
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
+show();
+if(localStorage.getItem(KEY))load();else{$('#setup').hidden=false;msg('Paste your sheet’s CSV link above to get started.')}
+</script></body></html>
